@@ -2,6 +2,23 @@
 
 A Mixed Integer Programming model for optimizing production planning in a single-node supply chain network with lead times, batch constraints, and time-varying demand.
 
+## Table of Contents
+
+- [Problem Description](#problem-description)
+- [Model Formulation](#model-formulation)
+- [Files](#files)
+- [Configuration File](#configuration-file)
+- [Usage](#usage)
+  - [Basic Optimization](#run-the-model)
+  - [Rolling Horizon Validation](#rolling-horizon-optimization)
+  - [Sensitivity Analysis](#sensitivity-analysis-first-production-decision)
+- [Solution Insights](#solution-insights)
+- [Customization](#customization)
+- [Mathematical Details](#mathematical-details)
+- [Extensions](#extensions)
+- [Technical Notes](#technical-notes)
+- [References](#references)
+
 ## Problem Description
 
 This model addresses a fundamental supply chain planning problem:
@@ -71,9 +88,20 @@ Minimize:  Σ(c_supply × batch_size × n[t])  +  Σ(c_inv × I[t])  +  Σ(c_del
 
 ## Files
 
+### Core Model Files
 - **config.json**: Configuration file with all input parameters
 - **scp_model.py**: MIP model implementation using SciPy/HiGHS
-- **README.md**: This documentation file
+
+### Analysis and Validation
+- **rolling_horizon.py**: Initial rolling horizon implementation (tail subproblem approach)
+- **rolling_horizon_fixed.py**: Corrected rolling horizon with fixed variables
+- **debug_rolling.py**: State simulation verification script
+- **sensitivity_analysis.py**: First production decision sensitivity analysis
+- **ROLLING_HORIZON_ANALYSIS.md**: Detailed rolling horizon validation report
+
+### Documentation and Results
+- **README.md**: This comprehensive documentation
+- **first_production_sensitivity.png**: Sensitivity analysis visualization
 
 ## Configuration File
 
@@ -114,12 +142,26 @@ The `config.json` file contains all problem parameters:
 
 ### Run the Model
 
+Run the basic optimization:
+
 ```bash
 cd SCP
 python scp_model.py
 ```
 
-### Example Output
+Run the rolling horizon validation:
+
+```bash
+python rolling_horizon_fixed.py
+```
+
+Run the sensitivity analysis:
+
+```bash
+python sensitivity_analysis.py
+```
+
+### Example Output (Basic Model)
 
 ```
 ================================================================================
@@ -237,6 +279,110 @@ Special cases:
 - t < LT: No production arrival term
 
 Total: H equality constraints
+
+## Rolling Horizon Optimization
+
+The repository includes a rolling horizon validation that tests the model's consistency by re-solving with prior decisions fixed.
+
+### Approach
+
+```bash
+python rolling_horizon_fixed.py
+```
+
+This script:
+1. Solves the full optimization problem (Day 1)
+2. Re-solves with Day 1 production fixed (Day 2)
+3. Re-solves with Days 1-2 fixed (Day 3)
+4. ...continues through the horizon
+
+### Results
+
+✓ **9 out of 10 days match exactly**
+✓ **All costs remain at $9,190 (optimal)**
+✓ **One alternative optimal solution found at Day 3**
+
+The single mismatch (Day 4: 2 vs 1 batches) achieves the **same optimal cost**, demonstrating the existence of **multiple optimal solutions** - a common and expected phenomenon in MIP that provides flexibility in real-world implementation.
+
+**Key Validation:** The model is correct and produces truly optimal solutions. Re-optimization with fixed prior decisions maintains optimality, confirming the solution quality.
+
+See `ROLLING_HORIZON_ANALYSIS.md` for detailed analysis.
+
+## Sensitivity Analysis: First Production Decision
+
+Understanding how the first production decision impacts total cost provides valuable insights into solution robustness and cost structure.
+
+### Running the Analysis
+
+```bash
+python sensitivity_analysis.py
+```
+
+This analyzes total cost when fixing the first production decision to 1-10 batches while optimizing the rest of the horizon.
+
+### Results Summary
+
+| First Production (batches) | Units | Total Cost | Cost vs Optimal | Production Plan |
+|---------------------------|-------|------------|-----------------|-----------------|
+| 1 | 50 | $10,135.00 | +$945 (+10.3%) | [1, 6, 1, 2, 1, 2, 1, 1, 0, 0] |
+| 2 | 100 | $9,885.00 | +$695 (+7.6%) | [2, 5, 1, 2, 1, 2, 1, 1, 0, 0] |
+| 3 | 150 | $9,635.00 | +$445 (+4.8%) | [3, 4, 1, 2, 1, 2, 1, 1, 0, 0] |
+| 4 | 200 | $9,385.00 | +$195 (+2.1%) | [4, 3, 1, 2, 1, 2, 1, 1, 0, 0] |
+| **5** | **250** | **$9,190.00** | **OPTIMAL** ✓ | **[5, 2, 1, 2, 2, 2, 1, 1, 0, 0]** |
+| 6 | 300 | $9,215.00 | +$25 (+0.3%) | [6, 1, 1, 2, 2, 2, 1, 1, 0, 0] |
+| 7 | 350 | $9,240.00 | +$50 (+0.5%) | [7, 0, 1, 2, 2, 2, 1, 1, 0, 0] |
+| 8 | 400 | $9,290.00 | +$100 (+1.1%) | [8, 0, 0, 2, 2, 2, 0, 1, 0, 0] |
+| 9 | 450 | $9,365.00 | +$175 (+1.9%) | [9, 0, 0, 0, 2, 2, 0, 1, 0, 0] |
+| 10 | 500 | $9,440.00 | +$250 (+2.7%) | [10, 0, 0, 0, 1, 2, 0, 1, 0, 0] |
+
+### Visualization
+
+![First Production Sensitivity Analysis](first_production_sensitivity.png)
+
+**Figure 1:** Impact of first production decision on total cost
+- **Top panel:** Total cost curve showing convex relationship with unique minimum at 5 batches
+- **Bottom panel:** Cost component breakdown (supply, inventory holding, delay penalties)
+
+### Key Insights
+
+**1. Optimal Decision Confirmed**
+- **5 batches (250 units)** is the unique optimal first production decision
+- Achieves minimum total cost of **$9,190**
+
+**2. Asymmetric Cost Penalty**
+- **Underproduction (1-4 batches):** Very expensive! Up to **10.3% cost increase**
+  - Causes significant backlog and delay penalties
+  - Steep cost curve on the left side
+- **Overproduction (6-10 batches):** Gentler penalty, max **2.7% increase**
+  - Creates inventory holding costs but avoids delays
+  - Gradual cost increase on the right side
+
+**3. Cost Structure**
+- **Convex cost function** with clear unique minimum
+- Cost range: **$9,190 - $10,135** ($945 difference, 10.3% span)
+- Better to slightly overproduce than underproduce due to high delay penalties
+
+**4. Practical Implications**
+- First decision has **significant impact** on total cost
+- Model provides **robust guidance:** 5 batches is distinctly optimal
+- In uncertain environments, bias toward slightly higher initial production
+- Cost penalty for being 1 batch off: **$25-$195** depending on direction
+
+**5. Cost Component Analysis**
+
+From the stacked bar chart:
+- **Supply cost dominates** (~87% of total at optimum)
+- **Delay penalties** are the main driver of increased cost for underproduction
+- **Inventory holding costs** remain relatively small even with overproduction
+- This explains the asymmetric penalty structure
+
+### Management Insights
+
+This sensitivity analysis demonstrates:
+- The value of optimization: **$945 savings** vs. naive approach (1 batch)
+- Robustness around optimum: ±1 batch costs only $25-$195 extra
+- Risk management: Overproduction is less costly than underproduction
+- Decision confidence: Clear optimal point with measurable tradeoffs
 
 ## Extensions
 
