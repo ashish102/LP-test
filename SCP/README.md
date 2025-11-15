@@ -11,7 +11,8 @@ A Mixed Integer Programming model for optimizing production planning in a single
 - [Usage](#usage)
   - [Basic Optimization](#run-the-model)
   - [Rolling Horizon Validation](#rolling-horizon-optimization)
-  - [Sensitivity Analysis](#sensitivity-analysis-first-production-decision)
+  - [Deterministic Sensitivity Analysis](#sensitivity-analysis-first-production-decision)
+  - [Stochastic Sensitivity Analysis](#stochastic-sensitivity-analysis-demand-uncertainty)
 - [Solution Insights](#solution-insights)
 - [Customization](#customization)
 - [Mathematical Details](#mathematical-details)
@@ -96,12 +97,14 @@ Minimize:  Σ(c_supply × batch_size × n[t])  +  Σ(c_inv × I[t])  +  Σ(c_del
 - **rolling_horizon.py**: Initial rolling horizon implementation (tail subproblem approach)
 - **rolling_horizon_fixed.py**: Corrected rolling horizon with fixed variables
 - **debug_rolling.py**: State simulation verification script
-- **sensitivity_analysis.py**: First production decision sensitivity analysis
+- **sensitivity_analysis.py**: Deterministic first production decision sensitivity analysis
+- **stochastic_sensitivity.py**: Stochastic demand sensitivity analysis with Monte Carlo simulation
 - **ROLLING_HORIZON_ANALYSIS.md**: Detailed rolling horizon validation report
 
 ### Documentation and Results
 - **README.md**: This comprehensive documentation
-- **first_production_sensitivity.png**: Sensitivity analysis visualization
+- **first_production_sensitivity.png**: Deterministic sensitivity analysis visualization
+- **stochastic_sensitivity.png**: Stochastic sensitivity analysis visualization
 
 ## Configuration File
 
@@ -155,10 +158,16 @@ Run the rolling horizon validation:
 python rolling_horizon_fixed.py
 ```
 
-Run the sensitivity analysis:
+Run the deterministic sensitivity analysis:
 
 ```bash
 python sensitivity_analysis.py
+```
+
+Run the stochastic sensitivity analysis:
+
+```bash
+python stochastic_sensitivity.py
 ```
 
 ### Example Output (Basic Model)
@@ -383,6 +392,185 @@ This sensitivity analysis demonstrates:
 - Robustness around optimum: ±1 batch costs only $25-$195 extra
 - Risk management: Overproduction is less costly than underproduction
 - Decision confidence: Clear optimal point with measurable tradeoffs
+
+## Stochastic Sensitivity Analysis: Demand Uncertainty
+
+The deterministic analysis assumes perfect knowledge of future demand. In reality, demand is uncertain. This section analyzes how the optimal first production decision changes under stochastic demand.
+
+### Problem Setup
+
+**Demand Model:**
+- Config demand values are treated as **mean demand** (μ)
+- Actual demand follows: **D[t] ~ N(μ[t], σ²[t])** where **σ[t] = 0.3 × μ[t]** (30% coefficient of variation)
+- Demand is **truncated at 0** (no negative demand)
+
+**Rolling Horizon Simulation:**
+At each day during execution:
+1. **Known information**: Realized demand for all past days
+2. **Forecast**: Use mean demand for future days (uncertainty not yet resolved)
+3. **Optimization**: Re-optimize production plan using current state and forecast
+4. **Execution**: Execute today's production decision
+5. **Realization**: Observe actual demand and update state
+
+This represents realistic **Model Predictive Control (MPC)** under uncertainty.
+
+### Running the Stochastic Analysis
+
+```bash
+python stochastic_sensitivity.py
+```
+
+For each first production value (1-10 batches):
+- Generate **100 random demand scenarios**
+- Simulate complete rolling horizon for each scenario
+- Calculate actual costs based on realized demands
+- Compute mean and standard deviation across scenarios
+
+### Results Summary
+
+| First Production | Mean Cost | Std Dev | CV (%) | vs Optimal | Key Characteristics |
+|-----------------|-----------|---------|--------|------------|-------------------|
+| 1 batch (50u) | $23,774 | $15,681 | **66.0%** | +$1,421 | Extreme uncertainty, catastrophic scenarios |
+| **2 batches (100u)** | **$22,353** | **$6,620** | **29.6%** | **OPTIMAL** ✓ | **Best mean-uncertainty balance** |
+| 3 batches (150u) | $25,272 | $5,185 | 20.5% | +$2,919 | Good uncertainty control |
+| 4 batches (200u) | $29,752 | $5,553 | 18.7% | +$7,399 | - |
+| 5 batches (250u) | $34,875 | $6,164 | 17.7% | +$12,522 | Deterministic optimal |
+| 6 batches (300u) | $39,138 | $6,387 | 16.3% | +$16,784 | - |
+| 7 batches (350u) | $44,636 | $6,813 | 15.3% | +$22,283 | - |
+| 8 batches (400u) | $49,638 | $5,514 | 11.1% | +$27,285 | - |
+| 9 batches (450u) | $54,731 | $4,474 | 8.2% | +$32,378 | Very low uncertainty |
+| 10 batches (500u) | $57,357 | $4,838 | 8.4% | +$35,003 | Predictable but expensive |
+
+### Visualization
+
+![Stochastic Sensitivity Analysis](stochastic_sensitivity.png)
+
+**Figure 2:** Impact of first production decision under demand uncertainty
+- **Top panel:** Mean cost curve with ±1σ confidence bands and min-max range (100 scenarios)
+  - Dark blue line: Mean cost across scenarios
+  - Blue shaded area: ±1 standard deviation band
+  - Light gray area: Min-max range showing extreme scenarios
+  - Red star: Optimal decision (2 batches)
+- **Bottom panel:** Coefficient of variation showing relative uncertainty
+  - Shows cost uncertainty as percentage of mean
+  - Decreasing trend: higher production → lower relative uncertainty
+
+### Key Findings
+
+**1. Optimal Decision Shifts Dramatically**
+- **Deterministic optimal**: 5 batches → $9,190
+- **Stochastic optimal**: 2 batches → $22,353 (mean)
+- **Reason**: Lower initial production provides flexibility to adapt to realized demand
+
+**2. Cost Impact of Uncertainty**
+- Stochastic mean cost is **2.4× higher** than deterministic ($22k vs $9k)
+- Cannot perfectly match production to demand without perfect foresight
+- Forecast errors compound through rolling horizon
+- Demonstrates **value of demand forecasting accuracy**
+
+**3. Uncertainty Patterns (Coefficient of Variation)**
+- **1 batch: 66% CV** - Extreme variability from backlog risk
+  - High probability of severe stockouts
+  - Standard deviation ($15,681) exceeds mean cost
+  - Some scenarios have catastrophic costs >$100k
+- **2 batches: 30% CV** - Best trade-off
+  - Moderate uncertainty with lowest mean cost
+  - Balanced risk-return profile
+- **8-10 batches: 8-11% CV** - Very predictable
+  - High inventory buffers against uncertainty
+  - But mean costs are 2-3× higher than optimal
+  - "Safe but expensive" strategy
+
+**4. Cost Structure Evolution**
+- **Monotonically increasing** mean costs from 2→10 batches
+- **1 batch is worse than 2** due to extreme tail risk
+- Each additional batch adds ~$5,000 to mean cost
+- But reduces uncertainty (lower std dev)
+
+**5. Risk-Return Trade-off**
+
+The stochastic results reveal a fundamental trade-off:
+
+| Strategy | Mean Cost | Uncertainty | Risk Profile |
+|----------|-----------|-------------|--------------|
+| Conservative (1 batch) | Moderate | **Extreme** | High downside risk |
+| **Optimal (2 batches)** | **Lowest** | **Moderate** | **Balanced** |
+| Moderate (5 batches) | High | Low | Det. optimal, poor under uncertainty |
+| Aggressive (8-10 batches) | **Very High** | **Very Low** | Safe but inefficient |
+
+**6. Value of Flexibility**
+
+Lower initial production (2 vs 5 batches) enables:
+- Better adaptation to realized demand through re-optimization
+- Reduced over-production costs when demand is low
+- Faster response to high-demand scenarios
+- Overall lower expected cost despite occasional stockouts
+
+### Comparison: Deterministic vs Stochastic
+
+| Metric | Deterministic | Stochastic | Difference |
+|--------|--------------|------------|------------|
+| **Optimal First Production** | 5 batches | 2 batches | -60% |
+| **Optimal Cost** | $9,190 | $22,353 | +143% |
+| **Cost Range (1-10 batches)** | $9,190-$10,135 | $22,353-$57,357 | Much wider |
+| **Uncertainty** | None (perfect info) | High (CV=30% at opt.) | N/A |
+| **Decision Character** | Front-load production | Stay flexible | Strategic shift |
+
+### Practical Implications
+
+**1. Don't Use Deterministic Solutions in Uncertain Environments**
+- 5 batches (det. optimal) costs $34,875 under uncertainty (+56% vs stochastic optimal)
+- Ignoring uncertainty leads to poor decisions
+- Need stochastic optimization or robust optimization
+
+**2. Flexibility Has Value**
+- Lower initial commitment allows adaptation
+- Rolling horizon MPC captures value of waiting for information
+- Worth $12,522/horizon in this example (5 batch det. vs 2 batch stoch.)
+
+**3. Demand Forecasting is Critical**
+- Uncertainty increases costs by 143% ($13k difference)
+- Reducing demand forecast error (σ) would improve performance
+- Investment in demand sensing/forecasting has high ROI
+
+**4. Risk Tolerance Matters**
+- Risk-neutral decision makers: Choose 2 batches (minimize mean)
+- Risk-averse decision makers: Might prefer 3-4 batches (lower CV, slightly higher mean)
+- Can compute certainty equivalent based on utility function
+
+**5. Model Predictive Control Works**
+- Daily re-optimization adapts to realized demand
+- Feedback loop reduces impact of forecast errors
+- Demonstrates value of responsive supply chain systems
+
+### Statistical Insights
+
+**Uncertainty Decomposition:**
+- **Aleatory uncertainty**: Demand randomness (σ = 0.3μ)
+- **Epistemic uncertainty**: Forecast error for future periods
+- **Compounding effect**: Multi-period planning amplifies uncertainty
+
+**Scenario Statistics (2 batches, optimal):**
+- **Mean**: $22,353
+- **Median**: ~$21,000 (approx, from distribution)
+- **Range**: $13,424 - $53,783
+- **Best case**: 40% below mean
+- **Worst case**: 141% above mean
+- Demonstrates right-skewed cost distribution (tail risk)
+
+### When to Use Each Analysis
+
+**Use Deterministic Analysis when:**
+- Demand is highly predictable (low CV)
+- Planning for average/expected scenario
+- Quick approximation needed
+- Educational/theoretical purposes
+
+**Use Stochastic Analysis when:**
+- Demand uncertainty is significant
+- Making actual production decisions
+- Risk management is important
+- Evaluating value of information/flexibility
 
 ## Extensions
 
