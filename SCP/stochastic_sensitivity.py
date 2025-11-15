@@ -9,11 +9,14 @@ This script extends the sensitivity analysis to handle stochastic demand:
 - For each first production decision (1-10 batches):
   * Generate 100 random demand trajectories
   * Simulate rolling horizon optimization:
-    - At each day, re-optimize using:
-      * Known realized demand for past days
-      * Mean demand for future days (unknown)
-    - Execute decisions and observe realized demand
+    - At START of each day t, solve MIP:
+      * State reflects realized demand from days 1 to t-1 (past, known)
+      * Use MEAN forecast for days t to H (today and future, UNKNOWN)
+      * CRITICAL: Solver does NOT know today's (day t) realized demand!
+    - Execute production decision for day t
+    - Observe realized demand for day t (after MIP solve)
     - Calculate actual costs based on realized outcomes
+    - Update state and proceed to next day
   * Average costs across 100 scenarios
 - Plot mean cost with confidence intervals
 
@@ -201,11 +204,14 @@ def rolling_horizon_stochastic_simulation(config, first_prod, realized_demands, 
     """
     Simulate rolling horizon optimization with stochastic realized demand.
 
-    At each day:
-    - Use realized demand for past (known)
-    - Use mean demand for future (unknown)
-    - Re-optimize and execute
-    - Observe realized demand and update state
+    At START of each day t:
+    - State reflects realized demands from days 1 to t-1 (past, known)
+    - Solve MIP using MEAN forecast for days t to H (today and future, unknown)
+    - Execute production decision for day t
+    - Observe REALIZED demand for day t (not known during MIP solve!)
+    - Update state and move to next day
+
+    Key: When solving MIP at start of day t, we do NOT know day t's demand yet!
 
     Returns:
     --------
@@ -234,11 +240,11 @@ def rolling_horizon_stochastic_simulation(config, first_prod, realized_demands, 
     total_inv_cost = 0
     total_delay_cost = 0
 
-    # Day 1: Optimize with first production fixed, using mean demands
+    # Day 1 START: Optimize with first production fixed
+    # At start of day 1, we know NOTHING about realized demands yet
+    # Use MEAN forecast for ALL days 1-H (including today, day 1!)
     fixed_vars = {1: first_prod}
-
-    # Build demands for optimization (all mean since nothing is known yet)
-    opt_demands = mean_demands.copy()
+    opt_demands = mean_demands.copy()  # Mean forecast for days 1-H
 
     c, constraints, bounds, integrality, _ = build_scp_model_general(
         config, fixed_vars, 1,
@@ -288,17 +294,14 @@ def rolling_horizon_stochastic_simulation(config, first_prod, realized_demands, 
 
         # Re-optimize for next day if not at horizon end
         if day < H:
-            # Build demand forecast: known (realized) for days 1..day, mean for day+1..H
+            # CRITICAL: At START of day (day+1), we don't know today's demand yet!
+            # - Known: Realized demands from days 1 to day (already in state)
+            # - Unknown: Demands for days (day+1) to H - use MEAN forecast
+            # - Today's demand (day+1) is NOT known when solving MIP!
             opt_demands = mean_demands.copy()
-            # We don't need to update opt_demands with realized because we're using
-            # the actual state (inventory/backlog) which already reflects realized demands
 
-            # Fix production decisions for days 1..day
-            fixed_vars = {d: production_decisions[d-1] for d in range(1, day + 2)}
-            # Note: day+1 decision was made in previous optimization but we fix it
-
-            # Actually, let me reconsider - we should re-optimize allowing changes
-            # to future decisions. Only fix up to current day.
+            # Fix production decisions for days we've already executed (1 to day)
+            # Do NOT fix future days - re-optimize them with updated state
             fixed_vars = {d: production_decisions[d-1] for d in range(1, day + 1)}
 
             c, constraints, bounds, integrality, _ = build_scp_model_general(

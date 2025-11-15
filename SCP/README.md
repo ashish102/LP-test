@@ -405,14 +405,17 @@ The deterministic analysis assumes perfect knowledge of future demand. In realit
 - Demand is **truncated at 0** (no negative demand)
 
 **Rolling Horizon Simulation:**
-At each day during execution:
-1. **Known information**: Realized demand for all past days
-2. **Forecast**: Use mean demand for future days (uncertainty not yet resolved)
-3. **Optimization**: Re-optimize production plan using current state and forecast
-4. **Execution**: Execute today's production decision
-5. **Realization**: Observe actual demand and update state
 
-This represents realistic **Model Predictive Control (MPC)** under uncertainty.
+At the **START of each day t**:
+1. **State**: Reflects realized demands from days 1 to t-1 (past, known)
+2. **Forecast**: Use MEAN demand for days **t to H** (today and future, UNKNOWN)
+   - **CRITICAL**: When solving MIP at start of day t, we do NOT know day t's realized demand yet!
+3. **Optimization**: Solve MIP to get production decision for day t (and re-plan future)
+4. **Execution**: Execute production decision for day t
+5. **Realization**: Observe realized demand for day t (AFTER optimization)
+6. **Update**: Update state with realized demand and move to day t+1
+
+**Key Point**: The MIP solver is never aware of "today's" demand - it only knows yesterday's and earlier. Today's demand is revealed AFTER we make the production decision. This represents realistic **Model Predictive Control (MPC)** under uncertainty.
 
 ### Running the Stochastic Analysis
 
@@ -457,10 +460,12 @@ For each first production value (1-10 batches):
 
 ### Key Findings
 
+**Important**: All MIP optimizations use MEAN demand forecast for "today" and future days. The solver never has access to realized demand before making decisions - demand is revealed AFTER the production decision is executed. This realistic assumption is critical for valid stochastic analysis.
+
 **1. Optimal Decision Shifts Dramatically**
 - **Deterministic optimal**: 5 batches → $9,190
 - **Stochastic optimal**: 2 batches → $22,353 (mean)
-- **Reason**: Lower initial production provides flexibility to adapt to realized demand
+- **Reason**: Lower initial production provides flexibility to adapt to realized demand as it unfolds
 
 **2. Cost Impact of Uncertainty**
 - Stochastic mean cost is **2.4× higher** than deterministic ($22k vs $9k)
@@ -539,9 +544,10 @@ Lower initial production (2 vs 5 batches) enables:
 - Can compute certainty equivalent based on utility function
 
 **5. Model Predictive Control Works**
-- Daily re-optimization adapts to realized demand
-- Feedback loop reduces impact of forecast errors
-- Demonstrates value of responsive supply chain systems
+- Daily re-optimization adapts to realized demand as it becomes known
+- At each decision point, solver uses mean forecast (not realized demand for "today")
+- Feedback loop: observe today's demand → update state → re-optimize tomorrow
+- Demonstrates value of responsive supply chain systems with rolling forecasts
 
 ### Statistical Insights
 
