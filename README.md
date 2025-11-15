@@ -1,6 +1,6 @@
 # LP-test
 
-Linear Programming and Mixed Integer Programming examples using SciPy with the HiGHS solver backend.
+The Linear Programming and Mixed Integer Programming examples using SciPy with the HiGHS solver backend.
 
 ## Overview
 
