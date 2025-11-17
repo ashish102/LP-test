@@ -1,0 +1,25 @@
+{
+  "description": "Supply Chain Planning - Single Node Configuration",
+  "planning_horizon": 10,
+  "lead_time": 2,
+  "initial_inventory": 0,
+  "batch_size": 50,
+  "demands": [80, 60, 100, 70, 90, 85, 75, 95, 65, 80],
+  "costs": {
+    "supply_per_unit": 10.0,
+    "inventory_holding_per_unit_per_day": 0.5,
+    "delay_penalty_per_unit_per_day": 5.0,
+    "final_unmet_demand_penalty_per_unit": 100.0
+  },
+  "comments": {
+    "planning_horizon": "Number of days to plan (H)",
+    "lead_time": "Lead time for production process P (LT)",
+    "initial_inventory": "Starting inventory at day 0",
+    "batch_size": "Production must be in multiples of this batch size",
+    "demands": "Daily demand D1, D2, ..., DH",
+    "supply_per_unit": "Cost per unit produced",
+    "inventory_holding_per_unit_per_day": "Cost to hold one unit for one day (based on end-of-day inventory)",
+    "delay_penalty_per_unit_per_day": "Penalty for delaying shipment by one day",
+    "final_unmet_demand_penalty_per_unit": "High penalty for demand not met by end of horizon"
+  }
+}
