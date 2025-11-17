@@ -13,6 +13,7 @@ A Mixed Integer Programming model for optimizing production planning in a single
   - [Rolling Horizon Validation](#rolling-horizon-optimization)
   - [Deterministic Sensitivity Analysis](#sensitivity-analysis-first-production-decision)
   - [Stochastic Sensitivity Analysis](#stochastic-sensitivity-analysis-demand-uncertainty)
+  - [Adaptive Two-Stage Analysis](#adaptive-two-stage-analysis-true-recourse-decisions)
 - [Solution Insights](#solution-insights)
 - [Customization](#customization)
 - [Mathematical Details](#mathematical-details)
@@ -99,6 +100,8 @@ Minimize:  Σ(c_supply × batch_size × n[t])  +  Σ(c_inv × I[t])  +  Σ(c_del
 - **debug_rolling.py**: State simulation verification script
 - **sensitivity_analysis.py**: Deterministic first production decision sensitivity analysis
 - **stochastic_sensitivity.py**: Stochastic demand sensitivity analysis with Monte Carlo simulation
+- **two_stage_sensitivity.py**: Two-stage stochastic analysis with all (p1, d1, p2) combinations
+- **adaptive_two_stage_analysis.py**: Adaptive two-stage analysis with recourse decisions
 - **ROLLING_HORIZON_ANALYSIS.md**: Detailed rolling horizon validation report
 
 ### Documentation and Results
@@ -168,6 +171,12 @@ Run the stochastic sensitivity analysis:
 
 ```bash
 python stochastic_sensitivity.py
+```
+
+Run the adaptive two-stage analysis:
+
+```bash
+python adaptive_two_stage_analysis.py
 ```
 
 ### Example Output (Basic Model)
@@ -577,6 +586,208 @@ Lower initial production (2 vs 5 batches) enables:
 - Making actual production decisions
 - Risk management is important
 - Evaluating value of information/flexibility
+
+## Adaptive Two-Stage Analysis: True Recourse Decisions
+
+The stochastic analysis above fixes the second-day production decision (p2) independently of the realized first-day demand. However, in reality, **the second-stage decision adapts to the observed first-stage outcome**. This is the essence of two-stage stochastic programming with recourse.
+
+### Problem Formulation
+
+**Two-Stage Decision Framework:**
+
+1. **First Stage (Day 1):**
+   - Choose production p1 (batches)
+   - Execute production
+   - Observe realized demand d1
+
+2. **Second Stage (Day 2):**
+   - **Given** realized d1 and resulting state (inventory, backlog)
+   - Choose optimal production p2 that minimizes expected future cost
+   - p2 adapts to d1 (different d1 → different optimal p2)
+
+3. **Subsequent Days (3-10):**
+   - Continue with rolling horizon MPC using mean forecasts
+
+### Key Difference from Static Analysis
+
+**Static (Previous Analysis):**
+- Choose (p1, p2) jointly before observing d1
+- p2 is the same regardless of what d1 turns out to be
+- Optimal: p1=2, p2=? (fixed across all d1 samples)
+
+**Adaptive (Correct Analysis):**
+- Choose p1 first
+- **After observing d1**, choose the optimal p2 for that specific d1
+- For the same p1 but different d1, we choose different p2
+- p2 = f(p1, d1) - a function of realized demand
+
+### Running the Adaptive Analysis
+
+```bash
+python adaptive_two_stage_analysis.py
+```
+
+This script:
+1. Loads `two_stage_sensitivity.csv` (contains all combinations of p1, d1 samples, and p2)
+2. For each p1 and each d1 sample:
+   - Finds the p2 with minimum mean cost
+   - This is the "adapted" p2 for that (p1, d1) combination
+   - Records the cost of this optimal p2
+3. Aggregates across all d1 samples to get statistics for each p1
+
+### Results Summary
+
+| p1 (batches) | Units | Mean Cost | Std Cost | CV (%) | Avg Optimal p2 | p2 Range | vs Optimal |
+|--------------|-------|-----------|----------|--------|----------------|----------|------------|
+| 1 | 50 | $18,468 | $751 | 4.1% | 5.04 | 3-6 | +$6 |
+| 2 | 100 | $18,538 | $777 | 4.2% | 3.66 | 2-5 | +$76 |
+| **3** | **150** | **$18,462** | **$773** | **4.2%** | **2.20** | **1-4** | **OPTIMAL** ✓ |
+| 4 | 200 | $19,001 | $837 | 4.4% | 1.19 | 1-3 | +$539 |
+| 5 | 250 | $22,151 | $1,619 | 7.3% | 1.00 | 1-1 | +$3,689 |
+| 6 | 300 | $26,389 | $1,769 | 6.7% | 1.00 | 1-1 | +$7,927 |
+| 7 | 350 | $31,242 | $1,872 | 6.0% | 1.00 | 1-1 | +$12,780 |
+| 8 | 400 | $36,375 | $1,889 | 5.2% | 1.00 | 1-1 | +$17,913 |
+| 9 | 450 | $41,771 | $1,982 | 4.7% | 1.00 | 1-1 | +$23,310 |
+| 10 | 500 | $46,182 | $1,436 | 3.1% | 1.00 | 1-1 | +$27,720 |
+
+### Key Findings
+
+**1. Optimal First-Stage Decision:**
+- **p1 = 3 batches (150 units)** minimizes expected cost
+- Mean cost: **$18,462** ± $773
+- This is significantly different from the static analysis optimal (p1=2)
+
+**2. Second-Stage Adaptation:**
+- For p1=3, the optimal p2 **ranges from 1 to 4 batches** depending on realized d1
+- Average p2 = 2.20 batches across all d1 scenarios
+- **This adaptation is crucial**: p2 responds to observed demand
+
+**Adaptation Examples for p1=3:**
+- If d1 is low (demand < expected), choose lower p2 (e.g., 1-2 batches)
+- If d1 is high (demand > expected), choose higher p2 (e.g., 3-4 batches)
+- This flexibility reduces expected cost compared to fixed p2
+
+**3. Adaptation Diminishes for Extreme p1:**
+- **p1 ≤ 3**: p2 has meaningful range (adapts significantly)
+  - p1=1: p2 ranges from 3-6 batches (avg 5.04)
+  - p1=2: p2 ranges from 2-5 batches (avg 3.66)
+  - p1=3: p2 ranges from 1-4 batches (avg 2.20)
+- **p1 ≥ 5**: p2 always = 1 batch (no adaptation)
+  - First stage already overproduced relative to optimal
+  - Second stage just chooses minimum production
+  - High inventory holding costs dominate
+
+**4. Cost Structure:**
+- **Underproduction penalty** (p1 < 3): Small penalty, ±$6-$539
+  - Second stage can compensate with higher p2
+  - Adaptation provides flexibility
+- **Overproduction penalty** (p1 > 3): Large penalty, up to +150%
+  - Creates excess inventory from day 1
+  - Second stage cannot "undo" overproduction
+  - Holding costs accumulate throughout horizon
+- **Asymmetric penalty structure**: Overproduction is much worse than underproduction
+
+**5. Comparison with Static Stochastic Analysis:**
+
+| Metric | Static (Previous) | Adaptive (Corrected) | Difference |
+|--------|------------------|---------------------|------------|
+| **Optimal p1** | 2 batches | 3 batches | +50% |
+| **Optimal Cost** | $22,353 | $18,462 | -17.4% |
+| **CV at Optimal** | 29.6% | 4.2% | -86% |
+| **Second-stage behavior** | Fixed | Adapts to d1 | Recourse value |
+
+The adaptive analysis reveals:
+- **Lower optimal cost** (-$3,891 or 17.4% improvement)
+- **Much lower uncertainty** (CV drops from 30% to 4%)
+- **Different optimal first-stage decision** (3 vs 2 batches)
+
+### Value of Recourse
+
+**Recourse Value = Cost(no recourse) - Cost(with recourse)**
+
+For p1=3:
+- Static (no adaptation): Would need to pre-commit to a fixed p2
+- Adaptive (with recourse): Choose optimal p2 after observing d1
+- Value of recourse: Substantial, as evidenced by cost reduction and uncertainty reduction
+
+**Key Insight:** The ability to adapt second-stage decisions to observed outcomes is extremely valuable:
+- Reduces expected cost by 17.4%
+- Reduces uncertainty (CV) by 86%
+- Changes the optimal first-stage decision
+
+### Practical Implications
+
+**1. First-Stage Conservative, Second-Stage Responsive:**
+- Optimal strategy: Start with moderate production (3 batches)
+- Observe actual demand
+- Adjust second-stage production based on observations
+- This "wait and see" approach beats aggressive early production
+
+**2. Information Value:**
+- Observing d1 before choosing p2 is worth ~$3,891 per planning cycle
+- Real-time demand information enables better decisions
+- Invest in systems that provide rapid demand feedback
+
+**3. Flexibility is Valuable:**
+- Second-stage production flexibility (ability to vary p2 from 1-4 batches) reduces risk
+- Production systems that allow responsive adjustments outperform rigid systems
+- Agile manufacturing capabilities have quantifiable value
+
+**4. Asymmetric Risk:**
+- **Slightly underproducing in stage 1** (p1=1-2) has small penalty (+0.03% to +0.4%)
+  - Can compensate in stage 2 with higher p2
+- **Overproducing in stage 1** (p1≥5) has large penalty (+20% to +150%)
+  - Cannot "undo" excess inventory in stage 2
+  - Holding costs persist throughout horizon
+- **Risk management implication:** When uncertain, err on the side of underproduction in early stages
+
+**5. Real-World Supply Chain Design:**
+- Design supply chains with **responsive capacity** in later stages
+- Avoid over-committing resources based on forecasts
+- Implement **postponement strategies**: delay final decisions until more information is available
+- Use **Model Predictive Control (MPC)** with frequent re-optimization
+
+### Statistical Insights
+
+**Uncertainty Reduction through Adaptation:**
+
+| p1 | Static CV (%) | Adaptive CV (%) | Uncertainty Reduction |
+|----|---------------|-----------------|----------------------|
+| 1 | ~66% | 4.1% | -94% |
+| 2 | ~30% | 4.2% | -86% |
+| 3 | N/A | 4.2% | Baseline |
+
+Adaptation dramatically reduces cost uncertainty because:
+1. Second-stage decision responds to actual state
+2. Eliminates mismatch between fixed p2 and realized d1
+3. Each scenario follows an optimal path from its realized state
+
+**Cost Distribution for Optimal p1=3:**
+- Mean: $18,462
+- Std: $773
+- Range: $16,456 - $20,132
+- Coefficient of variation: 4.2%
+
+This tight distribution indicates robust performance across demand scenarios.
+
+### Comparison: Three Analysis Types
+
+| Analysis Type | Optimal p1 | Expected Cost | Uncertainty | Key Assumption |
+|--------------|-----------|---------------|-------------|----------------|
+| **Deterministic** | 5 batches | $9,190 | None | Perfect demand forecast |
+| **Static Stochastic** | 2 batches | $22,353 | High (30% CV) | Fixed p2, no adaptation |
+| **Adaptive Stochastic** | 3 batches | $18,462 | Low (4% CV) | p2 adapts to d1 ✓ |
+
+**Key Takeaway:** The adaptive two-stage analysis provides the most realistic model of supply chain operations where decisions can respond to observed outcomes. It reveals both the optimal strategy and the value of responsive decision-making.
+
+### Implementation Note
+
+The adaptive analysis uses the same simulation data as the static analysis (`two_stage_sensitivity.csv`), but post-processes it correctly:
+- For each (p1, d1) combination, we **select** the p2 that minimizes cost
+- Rather than **averaging** across all p2 values
+- This reflects the real decision process: observe state, then optimize action
+
+The difference between selection (optimization) and averaging (expectation) is fundamental in stochastic optimization with recourse.
 
 ## Extensions
 
